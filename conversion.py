@@ -1,6 +1,19 @@
+"""
+Script de conversion des données de la base de données PostgreSQL vers la base de données MongoDB.
+
+Nous avons créé la base de données postgres sae dans un premier temps pour faciliter la migration 
+vers mongoDB. Pour ça, nous avons utilisé le script insert_queries.sql pour insérer 
+les données dans la base de données postgres. Voici les requêtes utilisées :
+CREATE DATABASE sae;
+\c sae;
+\i insert_queries.sql;
+\q
+"""
+
 import psycopg2
 import json
 import variables
+
 # =============================================================================
 # 1. Configuration des Connexions
 # =============================================================================
@@ -13,23 +26,24 @@ PG_PASSWORD = variables.mdp
 
 # --- Configuration MongoDB ---
 MONGO_URI = "mongodb://localhost:27017/"
-MONGO_DATABASE = "sae_mongo"  # Nom de la base de données MongoDB cible
-MONGO_COLLECTION = "restaurants" # Nom de la collection cible
+MONGO_DATABASE = "sae_mongo"  # Nom de notre base de données MongoDB pour la migration
+MONGO_COLLECTION = "restaurants" # Nom de la collection des documents comme demandé dans l'énoncé
 
 # =============================================================================
-# 2. Requête d'Extraction et de Dénormalisation (Extraction)
+# 2. Requêtes d'Extraction
 # =============================================================================
 
-# Cette requête fait une jointure INNER entre vos trois tables sur 'restaurant_id'.
-# Elle sélectionne les champs de 'sql_main' et les objets JSON/JSONB de 'sql_geo' et 'sql_feedback'.
+# Cette requête fait une jointure INNER entre les trois tables SQL sql_main, sql_geo et sql_feedback 
+# sur la clé restaurant_id et permet de récupérer les données de chaque restaurant.
+
 PG_QUERY = """
 SELECT
     m.restaurant_id,
     m.name,
     m.cuisine,
     m.borough,
-    g.address,    -- Données géographiques intégrées
-    f.grades      -- Données de feedback intégrées
+    g.address,    -- Les données géographiques contenues dans la table sql_geo
+    f.grades      -- Les données de feedback contenues dans la table sql_feedback
 FROM
     sql_main m
 INNER JOIN
@@ -50,11 +64,12 @@ def transform_record_to_document(record):
         record (tuple): Une ligne de résultat de la requête PG_QUERY.
 
     Returns:
-        dict: Le document MongoDB dénormalisé.
+        dict: Le document MongoDB contenant les données de chaque restaurant sous forme de dictionnaire.
     """
     (restaurant_id, name, cuisine, borough, address_jsonb, grades_jsonb) = record
     
-    # Fonction de conversion des chaînes JSON en objets Python lorsque cela est nécessaire
+    # Fonction de conversion des chaînes JSON en objets Python pour les données de type JSONB.
+
     def _maybe_load(v):
         if isinstance(v, str):
             try:
@@ -68,8 +83,8 @@ def transform_record_to_document(record):
 
     # Construction du document MongoDB final
     document = {
-        # L'ID interne de MongoDB sera généré automatiquement.
-        # Nous conservons l'ID PostgreSQL comme référence.
+        # Vu que l'ID interne de MongoDB est généré automatiquement,
+        # nous conservons l'ID PostgreSQL comme référence.
         "restaurant_id": restaurant_id,
         
         # Champs de la table sql_main
@@ -93,7 +108,19 @@ def transform_record_to_document(record):
 def migrate_data():
     """
     Orchestre le processus complet d'Extraction, Transformation et Chargement.
+
+    Args:
+        None : Aucun argument
+
+    Returns:
+        None : Aucun retour
+
+    Raises:
+        psycopg2.Error: Si une erreur survient lors de la connexion à PostgreSQL
+        Exception: Si une erreur survient lors de la migration des données
     """
+
+    # Initialisation des connexions
     pg_conn = None
     output_fp = None
     
@@ -108,17 +135,19 @@ def migrate_data():
         pg_cursor = pg_conn.cursor()
         print(f"Connecté à PostgreSQL BDD: {PG_DATABASE}")
 
-        # --- Préparer le fichier de sortie JSON (one JSON doc per line) ---
+        # --- Préparation du fichier de sortie JSON (un document JSON par ligne) ---
         OUTPUT_FILE = "restaurants.json"
         output_fp = open(OUTPUT_FILE, "w", encoding="utf-8")
         print(f"Écriture vers le fichier: {OUTPUT_FILE}")
         
-        # --- Exécution de la Requête (Extraction) ---
+        # --- Exécution de la requête SQL pour récupérer les données de chaque restaurant ---
         pg_cursor.execute(PG_QUERY)
-        print("🔍 Requête PostgreSQL exécutée. Début de la transformation... (écriture fichier)")
+        print("Requête PostgreSQL exécutée. Début de la transformation... (écriture dans le fichier)")
         
         # --- Transformation et Chargement ---
-        BATCH_SIZE = 1000  # Taille du lot pour l'insertion en masse
+        # Au lieu d'insérer chaque document dans MongoDB une par une, on va insérer les documents par lots de 1000.
+        # De quoi optimiser le temps d'exécution de la migration.
+        BATCH_SIZE = 1000  
         documents_to_insert = []
         records_processed = 0
         
@@ -166,6 +195,6 @@ def migrate_data():
 
 if __name__ == "__main__":
     migrate_data()
-    print("\nFichier NDJSON prêt. Pour importer dans MongoDB utilise :")
-    print("mongoimport --db sae_mongo --collection restaurants --file restaurants.ndjson --verbose")
+    print("\nFichier JSON prêt. Prochaine étape : importation dans MongoDB via la commande suivante :")
+    print("mongoimport --db sae_mongo --collection restaurants --file restaurants.json --verbose")
         
