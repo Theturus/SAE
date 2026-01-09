@@ -1,5 +1,5 @@
 """
-Script du programme principal de notre application de recherche de restaurants.
+Notre script du programme principal de l'application de recherche de restaurants :
 """
 
 from pymongo import MongoClient
@@ -12,12 +12,11 @@ import heapq
 from difflib import get_close_matches
 from collections import defaultdict
 
-# --------------------------
-# A. PARAMÈTRES DE CONNEXION AUX SERVEURS PostgreSQL et MongoDB
-# --------------------------
 
-# --- Configuration PostgreSQL ---
-# Ici, le serveur PostgreSQL est utile pour le cache des résultats et pour la sauvegarde des résultats, mais pas pour la recherche des restaurants.
+# --- Paramètres de connexion aux serveurs PostgreSQL et MongoDB ---
+
+# Configuration PostgreSQL
+# Serveur PostgreSQL utilisé pour le cache des résultats et pour la sauvegarde des résultats.
 PG_HOST = "localhost"
 PG_DATABASE = "sae"
 PG_USER = "postgres"
@@ -33,12 +32,13 @@ try:
 except ImportError:
     PG_PASSWORD = ""
 
-# --- Configuration MongoDB ---
+# Configuration MongoDB
+# Connexion à la base de données MongoDB
 client = MongoClient("mongodb://localhost:27017/")
 database = client["sae_mongo"]
 collection = database["restaurants"]
 
-# --- Connexion PostgreSQL ---
+# Connexion à la base de données PostgreSQL
 pg_conn = None
 try:
     pg_conn = psycopg2.connect(
@@ -66,23 +66,20 @@ try:
         );
     """)
     
-    # Création d'un index composite pour les recherches de cache
-    # OPTIMISATION : L'index composite (latitude, longitude, cuisine) permet d'accélérer les recherches
-    # en réduisant le nombre de lignes à scanner dans la table rhistory.
+    # Création d'un index composite pour les recherches de cache pour optimiser les performances de la recherche des restaurants.
     pg_cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_rhistory_coords_cuisine 
         ON rhistory(latitude, longitude, cuisine);
     """)
     
-    # OPTIMISATION : Index sur created_at pour accélérer le tri par date (ORDER BY created_at DESC)
-    # Dans le cas où les résultats sont identiques, on trie par date de création la plus récente.
+    # Index sur created_at pour accélérer le tri par date (ORDER BY created_at DESC)
+    # Dans le cas où les résultats sont identiques, on trie par date de création la plus récente pour optimiser les performances de la recherche.
     pg_cursor.execute("""
         CREATE INDEX IF NOT EXISTS idx_rhistory_created 
         ON rhistory(created_at DESC);
     """)
     
-    # OPTIMISATION : Analyser la table pour mettre à jour les statistiques utilisées par le planificateur
-    # Cela permet à PostgreSQL de choisir le meilleur plan d'exécution pour les requêtes
+    # Analyse de la table pour mettre à jour les statistiques utilisées par le planificateur pour optimiser les performances de la recherche des restaurants.
     pg_cursor.execute("ANALYZE rhistory;")
     
     pg_cursor.close()
@@ -92,9 +89,7 @@ except Exception as e:
     pg_conn = None
 
 # Connexion à MongoDB pour la recherche des restaurants.
-# Si la connexion à MongoDB échoue, le programme affiche un message d'erreur 
-# et ne peut pas rechercher les restaurants, comme il est demandé dans l'énoncé.
-
+# Si la connexion à MongoDB échoue, le programme affiche un message d'erreur et ne peut pas rechercher les restaurants.
 mongo_connected = False
 try:
     client.admin.command('ping') # Ping pour vérifier si la connexion à MongoDB est active
@@ -104,11 +99,10 @@ except Exception as e: # Erreur de connexion à MongoDB
     print('Erreur de connexion MongoDB')
     mongo_connected = False
 
-# --------------------------
-# B. POSITION DE L'UTILISATEUR
-# --------------------------
 
-# --- Définition des plages de validation des coordonnées de l'utilisateur ---
+# --- Position de l'utilisateur ---
+
+# Définition des plages de validation des coordonnées de l'utilisateur
 LAT_MIN = 40.50
 LAT_MAX = 41.20
 LON_MIN = -74.26
@@ -116,20 +110,6 @@ LON_MAX = -73.20
 
 # Fonction pour valider et récupérer les coordonnées de l'utilisateur
 def validate_and_get_coordinates():
-    """
-    Fonction pour la saisie et la validation des coordonnées de l'utilisateur
-    
-    Args:
-        None : Aucun argument
-
-    Returns:
-        user_position (tuple): Tuple contenant la latitude et la longitude
-        user_lat (float): Latitude de l'utilisateur
-        user_lon (float): Longitude de l'utilisateur
-
-    Raises:
-        Exception: Si une erreur survient lors de la saisie et la validation des coordonnées
-    """
 
     print("\n" + "="*60)
     print("SAISIE DES COORDONNÉES")
@@ -137,7 +117,7 @@ def validate_and_get_coordinates():
     print(f"Plage valide : Latitude [{LAT_MIN}, {LAT_MAX}], Longitude [{LON_MIN}, {LON_MAX}]")
     print("Exemple : Latitude 40.7589, Longitude -73.9851 (Times Square)\n")
     
-    # --- 1. Saisie et Validation de la Latitude ---
+    # Saisie et Validation de la Latitude
     user_lat = None
     while True:
         try:
@@ -160,9 +140,9 @@ def validate_and_get_coordinates():
             print("Erreur de Format: La latitude doit être un nombre (ex: 40.7589)")
         except KeyboardInterrupt:
             print("\n\nOperation annulee par l'utilisateur")
-            exit(0) # On quitte le programme si l'utilisateur interrompt la saisie des coordonnées
+            exit(0) # On quitte le programme si l'utilisateur interrompt la saisie
     
-    # --- 2. Saisie et Validation de la Longitude ---
+    # Saisie et Validation de la Longitude
     user_lon = None
     while True:
         try:
@@ -185,56 +165,35 @@ def validate_and_get_coordinates():
             print("Erreur de Format: La longitude doit etre un nombre (ex: -73.9851)")
         except KeyboardInterrupt:
             print("\n\nOperation annulee par l'utilisateur")
-            exit(0) # On quitte le programme si l'utilisateur interrompt la saisie des coordonnées
+            exit(0) # On quitte le programme si l'utilisateur interrompt la saisie ici également
     
-    user_position = (user_lat, user_lon) # Création du tuple contenant la latitude et la longitude
+    user_position = (user_lat, user_lon) # Création du tuple contenant la latitude et la longitude 
     print(f"\nCoordonnees validees : ({user_lat}, {user_lon})")
     return user_position, user_lat, user_lon
 
 # Appel de la fonction
 user_position, user_lat, user_lon = validate_and_get_coordinates()
 
-# --------------------------
-# C. FILTRE DE CUISINE
-# --------------------------
+
+# --- Filtre de cuisine ---
+
+# Au lieu de renvoyer tous les restaurants, cette fonction va permettre de trouver des suggestions de cuisine proches
+# si l'utilisateur renseigne une cuisine invalide ou une faute de frappe.
+# Pour cela, on va utiliser la fonction get_close_matches de difflib.
 
 def get_cuisine_suggestions(user_input, available_cuisines):
-    """
-    Au lieu de renvoyer tous les restaurants, cette fonction va permettre de trouver des suggestions de cuisine proches 
-    en cas de faute de frappe de l'utilisateur. Pour cela, on utilise l'algorithme de similarité de séquences de difflib.
-
-    Args:
-        user_input (str): Type de cuisine saisi par l'utilisateur
-        available_cuisines (list): Liste des types de cuisine disponibles
-
-    Returns:
-        matches (list): Liste des types de cuisine proches
-
-    Raises:
-        Exception: Si une erreur survient lors de la récupération des suggestions de cuisine
-    """
-
+    # On vérifie si l'utilisateur a saisi une cuisine ou si la liste des cuisines disponibles est vide.
     if not user_input or not available_cuisines:
+        # Si c'est le cas, on retourne une liste vide.
         return []
     
-    # On trouve les correspondances proches (ratio de similarité > 0.6) grâce à la fonction get_close_matches de difflib.
+    # On trouve les correspondances proches (ratio de similarité > 0.6) 
     matches = get_close_matches(user_input, available_cuisines, n=3, cutoff=0.6)
     return matches
 
+
+# Fonction pour valider et récupérer la cuisine de l'utilisateur avec suggestions en cas de faute de frappe.
 def validate_and_get_cuisine():
-    """
-    Fonction pour la saisie et la validation de la cuisine de l'utilisateur
-    avec suggestions en cas de faute de frappe de l'utilisateur.
-
-    Args:
-        None : Aucun argument
-
-    Returns:
-        user_cuisine (str): Type de cuisine recherché (None ou '' si pas de filtre)
-
-    Raises:
-        Exception: Si une erreur survient lors de la récupération de la liste des cuisines
-    """
 
     print("\n" + "="*60)
     print("FILTRE DE CUISINE")
@@ -260,7 +219,7 @@ def validate_and_get_cuisine():
             print("Recherche sans filtre de cuisine")
             break
         
-        # Cas 2 : Vérifier si la cuisine existe dans la base de données MongoDB.
+        # Cas 2 : En cas de saisie valide, on vérifie si la cuisine existe dans la base de données MongoDB.
         if available_cuisines and user_input in available_cuisines:
             user_cuisine = user_input
             print(f"Recherche des restaurants de type : {user_input.title()}")
@@ -289,32 +248,20 @@ def validate_and_get_cuisine():
 
 user_cuisine = validate_and_get_cuisine()
 
-# --------------------------
-# D. FONCTIONS DE CACHE
-# --------------------------
 
+# --- Fonctions de cache ---
+
+# Fonction pour insérer les résultats dans le cache ou mettre à jour le cache avec les résultats les plus récents.
+# Elle nettoie également le cache si nécessaire pour garder un maximum de 20 lignes.
 def update_cache(lat, lon, cuisine, results):
-    """
-    Fonction pour insérer les résultats dans le cache ou mettre à jour le cache avec les résultats les plus récents.
-    Elle nettoie également le cache si nécessaire pour garder un maximum de 20 lignes.
-
-    Args:
-        lat (float): Latitude de la position de l'utilisateur
-        lon (float): Longitude de la position de l'utilisateur
-        cuisine (str ou None): Type de cuisine recherché (None ou '' si pas de filtre)
-        results (list): Liste des résultats à stocker dans le cache
-
-    Returns:
-        None : Aucun retour
-    """
-
-    if pg_conn is None: # Si la connexion à PostgreSQL est échue, on ne peut pas mettre à jour le cache.
+    # Si la connexion à PostgreSQL est échue, on ne peut pas mettre à jour le cache.
+    if pg_conn is None:
         return
     
     try:
         pg_cursor = pg_conn.cursor()
         
-        # Vérifier le nombre de lignes
+        # On vérifie le nombre de lignes dans le cache pour nettoyer si nécessaire.
         pg_cursor.execute("SELECT COUNT(*) FROM rhistory")
         count = pg_cursor.fetchone()[0]
         
@@ -347,26 +294,15 @@ def update_cache(lat, lon, cuisine, results):
         print(f"Erreur lors de la mise a jour du cache : {e}")
 
 
+# Fonction pour vérifier si une requête similaire existe dans le cache avec une tolérance de +/-0.001 pour la latitude et la longitude grâce à l'index composite de la table rhistory.
 def check_cache(lat, lon, cuisine):
-    """
-    Cette fonction vérifie si une requête similaire existe dans le cache avec une tolérance de +/-0.001
-    pour la latitude et la longitude grâce à l'index composite de la table rhistory.
-    
-    Args:
-        lat (float): Latitude de la position de l'utilisateur
-        lon (float): Longitude de la position de l'utilisateur
-        cuisine (str ou None): Type de cuisine recherché (None ou '' si pas de filtre)
-    
-    Returns:
-        list ou None: Liste des résultats en cache, ou None si cache miss
-    """
-
-    if pg_conn is None:  # Si la connexion à PostgreSQL est échue, on ne peut pas vérifier le cache.
+    # Si la connexion à PostgreSQL est échue, on ne peut pas vérifier le cache.
+    if pg_conn is None:
         return None
     
     try:
         pg_cursor = pg_conn.cursor(cursor_factory=RealDictCursor)
-        # RealDictCursor permet de récupérer les résultats sous forme de dictionnaire
+        # RealDictCursor permet de récupérer les résultats sous forme de dictionnaire pour optimiser les performances de la recherche des restaurants
         
         # On applique une tolérance de +/-0.001 pour la latitude et la longitude 
         lat_min = lat - 0.001 
@@ -405,7 +341,7 @@ def check_cache(lat, lon, cuisine):
         pg_cursor.close()
         
         if result:
-            hstore_data = result['results'] # Récupération des résultats du cache.
+            hstore_data = result['results'] # Récupération des résultats du cache si trouvés
             results_list = json.loads(hstore_data['results_json'])
             return results_list
         
@@ -416,34 +352,16 @@ def check_cache(lat, lon, cuisine):
 
 
 
-# --------------------------
-# E. CALCUL DES DISTANCES ET RECUPERATION DES 3 MEILLEURS RESTAURANTS 
-# --------------------------
+# --- Calcul des distances et récupération des 3 meilleurs restaurants ---
 
+# Fonction pour rechercher les restaurants dans la base de données MongoDB et retourner les 3 meilleurs restaurants en fonction de la distance.
+# Elle utilise un heap pour garder seulement les 3 meilleurs résultats au lieu de trier toute la liste à la fin pour optimiser le temps de traitement.
 def search_restaurants(user_position, user_cuisine):
-    """
-    Fonction pour la recherche des restaurants dans la base de données MongoDB 
-    et retourne les 3 meilleurs restaurants en fonction de la distance.
-    Elle utilise un heap pour garder seulement les 3 meilleurs résultats
-    au lieu de trier toute la liste à la fin pour optimiser le temps de traitement.
-
-    Args:
-        user_position (tuple): Tuple contenant la latitude et la longitude de l'utilisateur
-        user_cuisine (str): Type de cuisine recherché (None ou '' si pas de filtre)
-
-    Returns:
-        tuple: (results, total_count) où :
-            - results (list): Liste des 3 meilleurs restaurants (top 3)
-            - total_count (int): Nombre total de restaurants correspondant aux critères
-
-    Raises:
-        Exception: Si une erreur survient lors de la recherche des restaurants
-    """
-    
+    # Si la connexion à MongoDB est échue, on ne peut pas rechercher les restaurants.
     if not mongo_connected:
-        return [], 0 # Si la connexion à MongoDB est échue, on ne peut pas rechercher les restaurants.
+        return [], 0
     
-    # On projette les champs nécessaires pour la recherche des restaurants.
+    # On projette uniquement sur les champs nécessaires pour la recherche des restaurants
     projection = {
         "restaurant_id": 1,
         "name": 1,
@@ -453,7 +371,7 @@ def search_restaurants(user_position, user_cuisine):
     }
     
     # On utilisera le module heapq pour garder les 3 restaurants les plus proches
-    # Etant donné que heapq suit le classement par ordre croissant, on utilisera la distance négative pour avoir les plus petites distances en premier
+    # Etant donné que heapq suit le classement par ordre croissant, on utilisera la distance négative pour avoir les plus grandes distances en premier
 
     heap = [] # On initialise une liste vide pour la heap
     total_count = 0 # Compteur pour le nombre total de restaurants correspondant aux critères
@@ -501,7 +419,7 @@ def search_restaurants(user_position, user_cuisine):
                     heapq.heappush(heap, (-distance, resto_name, resto_cuisine)) # heapq.heappush ajoute l'élément à la heap et ajuste le classement
                 else:
                     # Cas 2 : On a déjà 3 restaurants dans le heap, on compare avec le pire (le plus loin)
-                    if distance < -heap[0][0]:  # Comparaison avec la distance du premier tuple (distance, name, cuisine) avec la plus grande distance (en négatif) dans le heap
+                    if distance < -heap[0][0]:  # Comparaison avec la distance du premier tuple (distance, name, cuisine), la plus grande distance
                         heapq.heapreplace(heap, (-distance, resto_name, resto_cuisine)) # heapq.heapreplace remplace l'élément à la heap et ajuste le classement si la nouvelle distance est meilleure (plus petite)
         
         all_restaurants.close()
@@ -524,90 +442,95 @@ def search_restaurants(user_position, user_cuisine):
     
     return results, total_count
 
-# --------------------------
-# F. EXÉCUTION PRINCIPALE
-# --------------------------
 
-print("\n" + "="*60)
-print("RECHERCHE DE RESTAURANTS")
-print("="*60)
+# --- Exécution principale ---
 
-# On lance le chronomètre
-start_time = time.time()
+# Fonction pour lancer la recherche des restaurants et afficher les résultats.
+# Elle vérifie d'abord si une correspondance existe dans le cache avec une tolérance de +/-0.001 pour la latitude et la longitude grâce à l'index composite de la table rhistory.
+# Si aucune correspondance n'est trouvée, elle lance la recherche dans la base de données MongoDB et met à jour le cache si nécessaire.
+# Elle affiche également les résultats triés par distance croissante.
 
-# Pour toute recherche, on vérifie d'abord une correspondance dans le cache
-cached_results = check_cache(user_lat, user_lon, user_cuisine)
+def main():
 
-if cached_results:
-    print("\nResultats trouves dans le cache PostgreSQL")
-    results = cached_results
-    total_found = len(results)  # Pour le cache, on ne connaît pas le total réel
-    cache_hit = True
-else:
-    if not mongo_connected:
-        print("\nErreur : MongoDB n'est pas accessible")
-        print("Impossible de rechercher les restaurants.")
-        results = []
-        total_found = 0
-        cache_hit = False
+    print("\n" + "="*60)
+    print("RECHERCHE DE RESTAURANTS")
+    print("="*60)
+
+    # On lance le chronomètre
+    start_time = time.time()
+
+    # Pour toute recherche, on vérifie d'abord une correspondance dans le cache
+    cached_results = check_cache(user_lat, user_lon, user_cuisine)
+
+    if cached_results:
+        print("\nResultats trouves dans le cache PostgreSQL")
+        results = cached_results
+        total_found = len(results)  # Pour le cache, on ne connaît pas le total réel
+        cache_hit = True
     else:
-        print("\nRecherche dans MongoDB...")
-        cache_hit = False
-        results, total_found = search_restaurants(user_position, user_cuisine)
+        if not mongo_connected:
+            print("\nErreur : MongoDB n'est pas accessible")
+            print("Impossible de rechercher les restaurants.")
+            results = []
+            total_found = 0
+            cache_hit = False
+        else:
+            print("\nRecherche dans MongoDB...")
+            cache_hit = False
+            results, total_found = search_restaurants(user_position, user_cuisine)
 
-# --------------------------
-# G. AFFICHAGE DES RÉSULTATS 
-# --------------------------
-
-if results:
-    print("\n" + "="*60)
-    print("RÉSULTATS CLASSÉS PAR DISTANCE")
-    print("="*60)
-    
-    # On refait un tri par distance croissante même si on a déjà trié dans la fonction search_restaurants
-    if not cache_hit:
-        results.sort(key=lambda resto: resto['distance_km'])
-    
-    # On affiche les 3 restaurants les plus proches
-    closest_restaurants = results[:3]
-    
-    for i, r in enumerate(closest_restaurants, 1):
-        distance_str = f"{r['distance_km']:.2f} km"
-        cuisine_str = r.get('type cuisine', 'Non specifiee')
+    # Affichage des résultats
+    if results:
+        print("\n" + "="*60)
+        print("RÉSULTATS CLASSÉS PAR DISTANCE")
+        print("="*60)
         
-        print(f"\n{i}. {r['name']}")
-        print(f"   Distance : {distance_str}")
-        print(f"   Cuisine : {cuisine_str}")
-    
-    # On met à jour le cache si ce n'était pas un cache hit
-    if not cache_hit and results:
-        update_cache(user_lat, user_lon, user_cuisine, results)
-else:
+        # On refait un tri par distance croissante même si on a déjà trié dans la fonction search_restaurants
+        if not cache_hit:
+            results.sort(key=lambda resto: resto['distance_km'])
+        
+        # On affiche les 3 restaurants les plus proches
+        closest_restaurants = results[:3]
+        
+        for i, r in enumerate(closest_restaurants, 1):
+            distance_str = f"{r['distance_km']:.2f} km"
+            cuisine_str = r.get('type cuisine', 'Non specifiee')
+            
+            print(f"\n{i}. {r['name']}")
+            print(f"   Distance : {distance_str}")
+            print(f"   Cuisine : {cuisine_str}")
+        
+        # On met à jour le cache si ce n'était pas un cache hit
+        if not cache_hit and results:
+            update_cache(user_lat, user_lon, user_cuisine, results)
+    else:
+        print("\n" + "="*60)
+        print("AUCUN RESTAURANT TROUVÉ")
+        print("="*60)
+        print("Aucun restaurant ne correspond à vos critères de recherche.")
+
+    # Calcul et affichage du temps de traitement
+    end_time = time.time()
+    execution_time = end_time - start_time
+
     print("\n" + "="*60)
-    print("AUCUN RESTAURANT TROUVÉ")
+    print("STATISTIQUES")
     print("="*60)
-    print("Aucun restaurant ne correspond à vos critères de recherche.")
+    print(f"Temps de traitement : {execution_time:.4f} s")
+    print(f"Source des donnees : {'Cache PostgreSQL (rhistory)' if cache_hit else 'MongoDB'}")
+    if not cache_hit:
+        # Pour MongoDB, on affiche le nombre réel de restaurants correspondant aux critères
+        print(f"Restaurants trouves : {total_found}")
+        # Pour le cache, on ne connaît pas le nombre réel, donc on ne l'affiche pas pour rester fidèle aux résultats réels
 
-# Calcul et affichage du temps de traitement
-end_time = time.time()
-execution_time = end_time - start_time
+    # Fermeture des connexions
+    print("\n" + "="*60)
+    if pg_conn:
+        pg_conn.close()
+        print("Connexion PostgreSQL fermee")
+    client.close()
+    print("Connexion MongoDB fermee")
+    print("="*60)
 
-print("\n" + "="*60)
-print("STATISTIQUES")
-print("="*60)
-print(f"Temps de traitement : {execution_time:.4f} s")
-print(f"Source des donnees : {'Cache PostgreSQL (rhistory)' if cache_hit else 'MongoDB'}")
-if not cache_hit:
-    # Pour MongoDB, on affiche le nombre réel de restaurants correspondant aux critères
-    print(f"Restaurants trouves : {total_found}")
-    # Pour le cache, on ne connaît pas le nombre réel, donc on ne l'affiche pas pour rester fidèle aux résultats réels
-
-# Fermeture des connexions
-print("\n" + "="*60)
-if pg_conn:
-    pg_conn.close()
-    print("Connexion PostgreSQL fermee")
-client.close()
-print("Connexion MongoDB fermee")
-print("="*60)
-
+if __name__ == "__main__":
+    main()
